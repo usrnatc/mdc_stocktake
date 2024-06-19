@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"database/sql"
 	"fmt"
-	_ "github.com/mattn/go-sqlite3"
 	"log"
 	"os"
 	"regexp"
 	"strconv"
 	"sync"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 const (
@@ -164,12 +165,13 @@ func DestroyContext(ctx *Context) {
 	ctx.ctx_logfile.Close()
 }
 
-func ProcessInput(ctx *Context, user_input string) bool {
+func ProcessInput(ctx *Context, user_input string) {
 	if user_input == "exit" {
 		if ctx.ctx_current_loc != "" && ctx.ctx_current_code != "" {
 			SubmitTransaction(ctx, ctx.ctx_current_loc, ctx.ctx_current_code, 1)
 		}
-		return true
+		ctx.ctx_running = false
+		return
 	} else if user_input == "undo" {
 		if len(ctx.ctx_history) != 0 {
 			UndoTransaction(ctx)
@@ -177,7 +179,7 @@ func ProcessInput(ctx *Context, user_input string) bool {
 			log.Print("[INFO] No more transactions to revert")
 			println("[INFO] No more transactions to revert")
 		}
-		return false
+		return
 	}
 
 	if ctx.ctx_loc_finder.MatchString(user_input) {
@@ -187,28 +189,28 @@ func ProcessInput(ctx *Context, user_input string) bool {
 		log.Printf("[INFO] Location changed from \"%s\" to \"%s\"", ctx.ctx_current_loc, user_input)
 		fmt.Printf("[INFO] Location changed from \"%s\" to \"%s\"\n", ctx.ctx_current_loc, user_input)
 		ctx.ctx_current_loc = user_input
-		return false
+		return
 	} else if ctx.ctx_soh_finder.MatchString(user_input) {
 		if ctx.ctx_current_loc == "" {
 			log.Print("[ERROR] You need to set a location before providing a quantity")
 			println("[ERROR] You need to set a location before providing a quantity")
-			return false
+			return
 		}
 
 		if ctx.ctx_current_code == "" {
 			log.Print("[ERROR] You need to provide an item code before providing a quantity")
 			println("[ERROR] You need to provide an item code before providing a quantity")
-			return false
+			return
 		}
 
 		i, _ := strconv.Atoi(user_input) // FIXME: we should care about errors
 		SubmitTransaction(ctx, ctx.ctx_current_loc, ctx.ctx_current_code, i)
-		return false
+		return
 	} else {
 		if ctx.ctx_current_loc == "" {
 			log.Print("[ERROR] You need to provide a location before providing an item code.")
 			println("[ERROR] You need to provide a location before providing an item code.")
-			return false
+			return
 		}
 
 		if ctx.ctx_current_code != "" {
@@ -216,7 +218,7 @@ func ProcessInput(ctx *Context, user_input string) bool {
 		}
 
 		ctx.ctx_current_code = user_input
-		return false
+		return
 	}
 }
 
@@ -235,9 +237,7 @@ func main() {
 			log.Fatal("could not take user input.")
 		}
 
-		if ProcessInput(&ctx, scanner.Text()) {
-			break
-		}
+		ProcessInput(&ctx, scanner.Text())
 	}
 
 	println("[INFO] Closing stocktake, your data is safe :^)")
