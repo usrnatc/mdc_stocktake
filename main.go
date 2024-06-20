@@ -3,14 +3,14 @@ package main
 import (
 	"bufio"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"regexp"
 	"strconv"
 	"sync"
-	"net"
-	"encoding/json"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -21,9 +21,10 @@ const (
 	MDC_ST_LOC_PATTERN  = "^[A-W]\\d{1,2}$"
 	MDC_ST_SOH_PATTERN  = "^\\d{1,3}$"
 
-	MDC_ST_DB_QUERY = "INSERT INTO inventory (item_location, item_code, item_soh) VALUES (?, ?, ?) ON CONFLICT(item_location, item_code) DO UPDATE SET item_soh = item_soh + ?"
+	MDC_ST_DB_QUERY = "INSERT INTO inventory(item_location, item_code, item_soh) VALUES (?, ?, ?) ON CONFLICT(item_location, item_code) DO UPDATE SET item_soh = item_soh + ?"
 
-	MDC_ST_ALLAH_ADDRESS = "10.4.0.214:5467"
+	// MDC_ST_ALLAH_ADDRESS = "10.4.0.214:5467"
+	MDC_ST_ALLAH_ADDRESS = "127.0.0.1:5467"
 
 	MDC_ST_CLI_PROMPT = "MDC_ST $"
 )
@@ -43,19 +44,19 @@ var (
 )
 
 type prayer struct {
-	sender string `json: "sender"`
-	location string `json: "location"`
-	code string `json: "code"`
-	soh int `json: "soh"`
+	Sender   string `json:"Sender"`
+	Location string `json:"Location"`
+	Code     string `json:"Code"`
+	Soh      int    `json:"Soh"`
 }
 
 func NewPrayer(loc string, code string, soh int) prayer {
 	name, _ := os.Hostname()
 	return prayer{
-		sender: name,
-		location: loc,
-		code: code,
-		soh: soh,
+		Sender:   name,
+		Location: loc,
+		Code:     code,
+		Soh:      soh,
 	}
 }
 
@@ -71,7 +72,6 @@ func TalkWithGod(ctx *Context) {
 		return
 	}
 	ctx.ctx_allah_online = true
-	god_pipe := bufio.NewWriter(conn)
 
 	for c := range ctx.ctx_allah_chan {
 		if *c == END_OF_TRANSACTIONS {
@@ -79,15 +79,17 @@ func TalkWithGod(ctx *Context) {
 		}
 
 		p := NewPrayer(c.location, c.code, c.soh)
-		fmt.Printf("%v\n", p)
-		prayer, _ := json.Marshal(p)
+		prayer, err := json.Marshal(p)
+		if err != nil {
+			log.Print(err)
+			continue
+		}
 
-		god_pipe.WriteString(string(prayer))
+		conn.Write(prayer)
 	}
 	conn.Close()
 	close(ctx.ctx_allah_chan)
 }
-
 
 type Context struct {
 	ctx_dbconn  *sql.DB
@@ -103,7 +105,7 @@ type Context struct {
 	ctx_history      []*transaction
 
 	ctx_transaction_chan chan *transaction
-	ctx_allah_chan 	chan *transaction
+	ctx_allah_chan       chan *transaction
 	ctx_dbwait           *sync.WaitGroup
 
 	ctx_allah_online bool
@@ -159,7 +161,9 @@ func SubmitTransaction(ctx *Context, loc string, code string, soh int) {
 	ctx.ctx_history = append(ctx.ctx_history, count)
 	ctx.ctx_current_code = ""
 
-	ctx.ctx_allah_chan <- count
+	if ctx.ctx_allah_online {
+		ctx.ctx_allah_chan <- count
+	}
 	ctx.ctx_transaction_chan <- count
 }
 
@@ -215,7 +219,7 @@ func DestroyContext(ctx *Context) {
 
 	log.Print("[INFO] Destroying context, sending end of transactions...")
 	ctx.ctx_transaction_chan <- &END_OF_TRANSACTIONS
-	if (ctx.ctx_allah_online) {
+	if ctx.ctx_allah_online {
 		ctx.ctx_allah_chan <- &END_OF_TRANSACTIONS
 	}
 	close(ctx.ctx_transaction_chan)
