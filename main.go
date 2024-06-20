@@ -23,8 +23,7 @@ const (
 
 	MDC_ST_DB_QUERY = "INSERT INTO inventory(item_location, item_code, item_soh) VALUES (?, ?, ?) ON CONFLICT(item_location, item_code) DO UPDATE SET item_soh = item_soh + ?"
 
-	// MDC_ST_ALLAH_ADDRESS = "10.4.0.214:5467"
-	MDC_ST_ALLAH_ADDRESS = "127.0.0.1:5467"
+	MDC_ST_ALLAH_ADDRESS = "10.4.0.214:5467"
 
 	MDC_ST_CLI_PROMPT = "MDC_ST $"
 )
