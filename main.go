@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strconv"
 	"sync"
+	"net"
+	"encoding/json"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -20,6 +22,8 @@ const (
 	MDC_ST_SOH_PATTERN  = "^\\d{1,3}$"
 
 	MDC_ST_DB_QUERY = "INSERT INTO inventory (item_location, item_code, item_soh) VALUES (?, ?, ?) ON CONFLICT(item_location, item_code) DO UPDATE SET item_soh = item_soh + ?"
+
+	MDC_ST_ALLAH_ADDRESS = "10.4.0.214:5467"
 
 	MDC_ST_CLI_PROMPT = "MDC_ST $"
 )
@@ -38,6 +42,53 @@ var (
 	}
 )
 
+type prayer struct {
+	sender string `json: "sender"`
+	location string `json: "location"`
+	code string `json: "code"`
+	soh int `json: "soh"`
+}
+
+func NewPrayer(loc string, code string, soh int) prayer {
+	name, _ := os.Hostname()
+	return prayer{
+		sender: name,
+		location: loc,
+		code: code,
+		soh: soh,
+	}
+}
+
+func TalkWithGod(ctx *Context) {
+	ctx.ctx_dbwait.Add(1)
+	defer ctx.ctx_dbwait.Done()
+
+	conn, err := net.Dial("tcp", MDC_ST_ALLAH_ADDRESS)
+	if err != nil {
+		log.Print("[ERROR] Could not reach god, must be busy...")
+		close(ctx.ctx_allah_chan)
+		ctx.ctx_allah_online = false
+		return
+	}
+	ctx.ctx_allah_online = true
+	god_pipe := bufio.NewWriter(conn)
+
+	for c := range ctx.ctx_allah_chan {
+		if *c == END_OF_TRANSACTIONS {
+			break
+		}
+
+		p := NewPrayer(c.location, c.code, c.soh)
+		fmt.Printf("%v\n", p)
+		prayer, _ := json.Marshal(p)
+
+		god_pipe.WriteString(string(prayer))
+	}
+	conn.Close()
+	close(ctx.ctx_allah_chan)
+}
+
+
 type Context struct {
 	ctx_dbconn  *sql.DB
 	ctx_running bool
@@ -52,7 +103,10 @@ type Context struct {
 	ctx_history      []*transaction
 
 	ctx_transaction_chan chan *transaction
+	ctx_allah_chan 	chan *transaction
 	ctx_dbwait           *sync.WaitGroup
+
+	ctx_allah_online bool
 }
 
 func GenContext() Context {
@@ -62,6 +116,7 @@ func GenContext() Context {
 	ctx.ctx_current_code = ""
 	ctx.ctx_history = make([]*transaction, 0)
 	ctx.ctx_transaction_chan = make(chan *transaction)
+	ctx.ctx_allah_chan = make(chan *transaction)
 	ctx.ctx_running = true
 	ctx.ctx_dbwait = &sync.WaitGroup{}
 
@@ -104,6 +159,7 @@ func SubmitTransaction(ctx *Context, loc string, code string, soh int) {
 	ctx.ctx_history = append(ctx.ctx_history, count)
 	ctx.ctx_current_code = ""
 
+	ctx.ctx_allah_chan <- count
 	ctx.ctx_transaction_chan <- count
 }
 
@@ -159,9 +215,11 @@ func DestroyContext(ctx *Context) {
 
 	log.Print("[INFO] Destroying context, sending end of transactions...")
 	ctx.ctx_transaction_chan <- &END_OF_TRANSACTIONS
-	ctx.ctx_dbwait.Wait()
+	if (ctx.ctx_allah_online) {
+		ctx.ctx_allah_chan <- &END_OF_TRANSACTIONS
+	}
 	close(ctx.ctx_transaction_chan)
-
+	ctx.ctx_dbwait.Wait()
 	ctx.ctx_logfile.Close()
 }
 
@@ -186,6 +244,7 @@ func ProcessInput(ctx *Context, user_input string) {
 		if ctx.ctx_current_loc != "" && ctx.ctx_current_code != "" {
 			SubmitTransaction(ctx, ctx.ctx_current_loc, ctx.ctx_current_code, 1)
 		}
+		// TODO: this should be a single function call
 		log.Printf("[INFO] Location changed from \"%s\" to \"%s\"", ctx.ctx_current_loc, user_input)
 		fmt.Printf("[INFO] Location changed from \"%s\" to \"%s\"\n", ctx.ctx_current_loc, user_input)
 		ctx.ctx_current_loc = user_input
@@ -226,6 +285,7 @@ func main() {
 	ctx := GenContext()
 	scanner := bufio.NewScanner(os.Stdin)
 
+	go TalkWithGod(&ctx)
 	go StoreTransactions(&ctx)
 	defer DestroyContext(&ctx)
 
